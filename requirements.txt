@@ -8,3 +8,4 @@ langgraph==1.1.8
 litellm
 ollama==0.6.2
 uvicorn==0.48.0
+python-docx
