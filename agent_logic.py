@@ -11,16 +11,19 @@ from google.adk.models.google_llm import Gemini
 from google.adk.runners import InMemoryRunner
 from google.adk.tools import FunctionTool, AgentTool, google_search
 from google.genai import types
+from google.adk.models.lite_llm import LiteLlm
 
 load_dotenv()
 
 # 1. Retrieve the model identifier set in your Render environment variables panel.
 # We fall back to "gemini-2.5-flash" if running locally without an env file.
-my_model_name = os.getenv("my_model_name", "gemini-2.0-flash")
+# my_model_name = os.getenv("my_model_name", "gemini-2.0-flash")
+
+my_model = LiteLlm(model="groq/llama-3.1-8b-instant")
 
 # 2. Initialize the native Google Gemini model configuration.
 # The underlying Google GenAI SDK automatically grabs your API key from the environment.
-my_model = Gemini(model=my_model_name)
+# my_model = Gemini(model=my_model_name)
 
 
 def web_search(query: str) -> str:
