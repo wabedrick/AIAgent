@@ -16,7 +16,7 @@ load_dotenv()
 
 # 1. Retrieve the model identifier set in your Render environment variables panel.
 # We fall back to "gemini-2.5-flash" if running locally without an env file.
-my_model_name = os.getenv("my_model_name", "gemini-2.5-flash-lite")
+my_model_name = os.getenv("my_model_name", "gemini-2.0-flash")
 
 # 2. Initialize the native Google Gemini model configuration.
 # The underlying Google GenAI SDK automatically grabs your API key from the environment.
