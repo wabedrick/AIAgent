@@ -156,8 +156,10 @@ DO NOT attempt to format, read, or save the document yourself.
     ],
 )
 
-# Run the orchestrator
-user_input = input("Enter your request: ")
-runner = InMemoryRunner(agent=root_agent)
-response = runner.run_debug(user_input)
-print(response)
+# Wrap your local CLI code in this guard
+if __name__ == "__main__":
+    # Run the orchestrator locally
+    user_input = input("Enter your request: ")
+    runner = InMemoryRunner(agent=root_agent)
+    response = runner.run_debug(user_input)
+    print(response)
