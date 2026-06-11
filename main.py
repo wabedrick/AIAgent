@@ -82,61 +82,59 @@ async def root_health_check():
 #         print(f"RUNTIME AGENT ERROR EXCEPTION: {str(e)}", file=sys.stderr, flush=True)
 #         # Propagate the raw internal error message text back to your React client for easy debugging
 #         raise HTTPException(status_code=500, detail=f"Agent Execution Failure: {str(e)}")
-
 @app.post("/chat")
 async def chat_with_agent(user_input: dict):
-    # Safely parse the JSON payload sent by your React component
     query = user_input.get("message")
     
     if not query:
         raise HTTPException(status_code=400, detail="Incoming request message payload cannot be empty.")
 
-    # Diagnostic check for critical environment variables before execution
     if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
-        print("CRITICAL CONFIG ERROR: Missing Google Gemini API Key in environment settings.", file=sys.stderr, flush=True)
-        raise HTTPException(status_code=500, detail="Backend configuration error: Gemini API key is missing on Render settings.")
+        print("CRITICAL CONFIG ERROR: Missing Google API Key in environment settings.", file=sys.stderr, flush=True)
+        raise HTTPException(status_code=500, detail="Backend configuration error: API key is missing.")
 
     try:
-        # Initialize the stateful memory runner for the agent
-        runner = InMemoryRunner(agent=root_agent)
-        
-        session_id = "web_session"
-        user_id = "web_user"
-        
-        # 🔥 THE REAL FIX: Explicitly create the session in the runner's memory service
-        # before attempting to append messages to it.
-        await runner.session_service.create_session(
-            app_name="react_agent_app",
-            user_id=user_id,
-            session_id=session_id
-        )
-        
-        # Package the raw input string into the structured schemas required by the ADK
-        content = types.Content(
-            role='user',
-            parts=[types.Part(text=query)]
-        )
-        
-        full_response = ""
-        
-        # Restore the strict parameters required by the Pylance signature
-        async for event in runner.run_async(
-            session_id=session_id, 
-            user_id=user_id, 
-            new_message=content
-        ):
-            # Inspect and safely concatenate the chunked streaming text fragments
-            if hasattr(event, 'content') and event.content and event.content.parts:
-                for part in event.content.parts:
-                    if hasattr(part, 'text') and part.text:
-                        full_response += part.text
-                        
-        return {"reply": full_response}
-        
+        # 🔥 THE REAL FIX: Use 'async with' to properly boot the runner's internal session services.
+        # Without this context manager, the internal memory DB remains closed and throws 500 errors.
+        async with InMemoryRunner(agent=root_agent) as runner:
+            
+            session_id = "web_session"
+            user_id = "web_user"
+            
+            # Safely attempt to allocate the session now that the internal DB is booted
+            try:
+                await runner.session_service.create_session(
+                    app_name="react_agent_app",
+                    user_id=user_id,
+                    session_id=session_id
+                )
+            except Exception:
+                # If the ADK auto-created the session behind the scenes, we safely ignore the creation error
+                pass 
+            
+            # Package the input into the strict ADK schema
+            content = types.Content(
+                role='user',
+                parts=[types.Part(text=query)]
+            )
+            
+            full_response = ""
+            
+            # Execute the stream with the strict Pylance parameters
+            async for event in runner.run_async(
+                session_id=session_id, 
+                user_id=user_id, 
+                new_message=content
+            ):
+                if hasattr(event, 'content') and event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if hasattr(part, 'text') and part.text:
+                            full_response += part.text
+                            
+            return {"reply": full_response}
+            
     except Exception as e:
-        # Force print the exact Python error traceback straight to Render logs for visibility
         print(f"RUNTIME AGENT ERROR EXCEPTION: {str(e)}", file=sys.stderr, flush=True)
-        # Propagate the raw internal error message text back to your React client for easy debugging
         raise HTTPException(status_code=500, detail=f"Agent Execution Failure: {str(e)}")
 
 @app.get("/download/{filename}")
