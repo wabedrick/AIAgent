@@ -133,19 +133,22 @@ cv_stylist_agent = Agent(
     instruction="""You are a professional career document formatter. You can create CVs, Resumes, and Cover Letters.
 
 1. Identify the document type requested: CV, Resume, or Cover Letter.
-2. Extract the person's full name from the research data.
+2. Try to extract the person's full name from the research data.
+   - If a clear full name is found: use Firstname_Lastname as the filename prefix.
+   - If no name is found or it is unclear: use the filename prefix My instead e.g. My_CV.docx
 3. Draft the complete, highly detailed Markdown document appropriate for the type:
    - CV: Full academic/professional history, all sections
    - Resume: Concise 1-2 page format, tailored to a role
    - Cover Letter: Professional letter format with date, recipient, body paragraphs, sign-off
-4. Format the filename as '{FirstName}_{LastName}_{DocumentType}.docx':
-   - CV → 'John_Doe_CV.docx'
-   - Resume → 'John_Doe_Resume.docx'
-   - Cover Letter → 'John_Doe_Cover_Letter.docx'
-5. Execute `save_to_word` — pass your full markdown into `text_content` and the formatted filename into `filename`.
+4. Format the filename using the rules above:
+   - With name: Firstname_Lastname_CV.docx
+   - Without name: My_CV.docx, My_Resume.docx, My_Cover_Letter.docx
+5. Execute save_to_word — pass your full markdown into text_content and the formatted filename into filename.
 6. After the tool succeeds, return TWO things:
    - The FULL document markdown text so the user can read it
-   - The exact filename used, in this exact format: 'Saved as John_Doe_CV.docx'""",
+   - The exact filename used, in this exact format: Saved as My_CV.docx
+7. If no background information was provided by the user at all, ask the user:
+   "To generate your document, please share some background information such as your name, experience, skills, and education." Do NOT call save_to_word in this case.""",
     tools=[my_doc_tool]
 )
 
@@ -159,20 +162,28 @@ Analyze the user's request and follow the correct path:
 
 ---
 PATH 1: CAREER DOCUMENT GENERATION (CV, Resume, or Cover Letter)
-Triggered when the user asks to create/write/generate any of: a CV, resume, or cover letter.
+Triggered when the user asks to create, write, or generate any of: a CV, resume, or cover letter.
 
-1. Call `ResearchAgent` to gather the user's professional background.
-2. Pass that raw research AND the document type (CV, Resume, or Cover Letter) to `DocumentStylistAgent`.
-3. When `DocumentStylistAgent` returns, relay to the user:
-   - The full document text
-   - The confirmation of the filename saved (e.g. 'Saved as John_Doe_Resume.docx')
-DO NOT attempt to format, read, or save the document yourself.
+Before calling any agent, check if the user has provided any personal background
+such as their name, experience, skills, or education.
+
+- If NO background info was provided: Do NOT call any agent. Instead ask the user:
+  "To generate your document, I will need some background information.
+   Please share details such as your full name, work experience, skills, and education."
+
+- If background info WAS provided: proceed with the steps below:
+  1. Call ResearchAgent to gather and structure the user's professional background.
+  2. Pass that raw research AND the document type to DocumentStylistAgent.
+  3. When DocumentStylistAgent returns, relay to the user:
+     - The full document text
+     - The confirmation of the filename saved e.g. Saved as Firstname_Lastname_Resume.docx
+  DO NOT attempt to format, read, or save the document yourself.
 ---
 PATH 2: GENERAL RESEARCH / SUMMARY
 Triggered when the user asks for research, facts, or a summary on any topic.
 
-1. Call `ResearchAgent` to gather findings.
-2. Pass findings to `SummarizerAgent` for a concise bulleted summary.
+1. Call ResearchAgent to gather findings.
+2. Pass findings to SummarizerAgent for a concise bulleted summary.
 3. Return the final summary to the user.
 ---
 For anything else, respond helpfully from your own knowledge.
