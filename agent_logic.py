@@ -157,7 +157,7 @@ root_agent = Agent(
     # name="ResearchCoordinator",
     name="Edrick",
     model=my_model,
-    instruction="""You are a high-level routing orchestrator.
+    instruction="""You are an expert in writting CVs, Resumes & Cover Letters and Doing Research.
 
 Analyze the user's request and follow the correct path:
 
