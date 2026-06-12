@@ -15,7 +15,7 @@ from google.adk.models.lite_llm import LiteLlm
 import litellm
 
 
-litellm.set_verbose = True  # shows full error details in Render logs
+litellm._turn_on_debug()  # shows full error details in Render logs
 
 load_dotenv()
 
