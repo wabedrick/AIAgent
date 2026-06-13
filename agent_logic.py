@@ -15,7 +15,7 @@ from google.adk.models.lite_llm import LiteLlm
 import litellm
 
 
-litellm._turn_on_debug()  # shows full error details in Render logs
+litellm._turn_on_debug()  # type: ignore # shows full error details in Render logs
 
 load_dotenv()
 
@@ -136,20 +136,26 @@ cv_stylist_agent = Agent(
 2. Try to extract the person's full name from the research data.
    - If a clear full name is found: use Firstname_Lastname as the filename prefix.
    - If no name is found or it is unclear: use the filename prefix My instead e.g. My_CV.docx
-3. Draft the complete, highly detailed Markdown document appropriate for the type:
+3. Search the web using my_search_tool for the best and most upto date format for that particular document such that you give the user 
+the most professional upto date and official document.
+   -If it's East African format or standard, search it on the web and give according to it
+   -If it's USA or Europe standards, you can get all these on the internet. Please use your knowledge base on the format and standard, such it
+   on the web.
+4. Draft the complete, highly detailed Markdown document appropriate for the type:
    - CV: Full academic/professional history, all sections
    - Resume: Concise 1-2 page format, tailored to a role
    - Cover Letter: Professional letter format with date, recipient, body paragraphs, sign-off
-4. Format the filename using the rules above:
+5. Format the filename using the rules above:
    - With name: Firstname_Lastname_CV.docx
    - Without name: My_CV.docx, My_Resume.docx, My_Cover_Letter.docx
-5. Execute save_to_word — pass your full markdown into text_content and the formatted filename into filename.
-6. After the tool succeeds, return TWO things:
+6. Execute save_to_word — pass your full markdown into text_content and the formatted filename into filename.
+7. After the tool succeeds, return TWO things:
    - The FULL document markdown text so the user can read it
    - The exact filename used, in this exact format: Saved as My_CV.docx
-7. If no background information was provided by the user at all, ask the user:
-   "To generate your document, please share some background information such as your name, experience, skills, and education." Do NOT call save_to_word in this case.""",
-    tools=[my_doc_tool]
+8. If no background information was provided by the user at all, ask the user:
+   "To generate your document, please share some background information such as your name, experience, skills, and education." 
+   Do NOT call save_to_word in this case.""",
+    tools=[my_doc_tool, my_search_tool]
 )
 
 # High-level orchestrator that routes between the sub-agents based on the user's request.
