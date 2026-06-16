@@ -10,3 +10,4 @@ ollama==0.6.2
 uvicorn==0.48.0
 python-docx
 tavily-python
+python-dotenv

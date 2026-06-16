@@ -1,6 +1,8 @@
 import os
 import sys
 from contextlib import asynccontextmanager
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -8,19 +10,24 @@ from fastapi.responses import FileResponse
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
-from agent_logic import root_agent, switch_to_gemini, switch_to_groq
+from agent_logic import (
+    root_agent,
+    switch_to_gemini,
+    switch_to_cerebras,
+    switch_to_groq,
+    make_groq_model,
+)
 
-# --- Module-level runner (persists for the life of the process) ---
-runner: InMemoryRunner | None = None
+# ── Runner (persists for the life of the process) ────────────────────────────
+
+runner: Optional[InMemoryRunner] = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Boot the runner once on startup, tear it down on shutdown."""
     global runner
     runner = InMemoryRunner(agent=root_agent, app_name="react_agent_app")
     await runner.__aenter__()
 
-    # Pre-create the session so it's ready for the first request
     try:
         await runner.session_service.create_session(
             app_name="react_agent_app",
@@ -28,11 +35,10 @@ async def lifespan(app: FastAPI):
             session_id="web_session"
         )
     except Exception:
-        pass  # Already exists
+        pass
 
-    yield  # App is now running
-
-    # Cleanup on shutdown
+    print("[Startup] Runner initialized with Groq as primary model.", flush=True)
+    yield
     await runner.__aexit__(None, None, None)
 
 app = FastAPI(title="AI Agent Orchestrator Backend", lifespan=lifespan)
@@ -44,6 +50,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"]
 )
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+RATE_LIMIT_TERMS = ["429", "rate_limit", "quota", "exceeded", "resource_exhausted", "too many"]
+
+def is_rate_limit_error(msg: str) -> bool:
+    return any(term in msg.lower() for term in RATE_LIMIT_TERMS)
+
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 async def root_health_check():
@@ -61,9 +76,14 @@ async def chat_with_agent(user_input: dict):
     if not query:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
+    if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
+        if not os.environ.get("GROQ_API_KEY") and not os.environ.get("CEREBRAS_API_KEY"):
+            raise HTTPException(status_code=500, detail="No API keys configured.")
+
     user_id = "web_user"
     session_id = "web_session"
 
+    # Ensure session exists
     try:
         session = await runner.session_service.get_session(
             app_name="react_agent_app",
@@ -88,9 +108,12 @@ async def chat_with_agent(user_input: dict):
         parts=[types.Part(text=query)]
     )
 
-    full_response = ""
+    async def run_agent() -> str:
+        """Execute the agent and collect the full response."""
 
-    try:
+        assert runner is not None, "Runner has not been initialized"
+        full_response = ""
+        
         async for event in runner.run_async(
             session_id=session_id,
             user_id=user_id,
@@ -100,102 +123,46 @@ async def chat_with_agent(user_input: dict):
                 for part in event.content.parts:
                     if hasattr(part, 'text') and part.text:
                         full_response += part.text
+        return full_response
 
-        return {"reply": full_response}
+    # ── 4-model fallback chain ────────────────────────────────────────────────
+    # Order: Groq (key 1) → Groq (key 2, rotated) → Gemini → Cerebras
+    fallback_chain = [
+        ("Groq (primary key)",   None),             # already active at startup
+        ("Groq (rotated key)",   switch_to_groq),   # rotates to key 2 if available
+        ("Gemini 2.0 Flash",     switch_to_gemini),
+        ("Cerebras llama-3.3",   switch_to_cerebras),
+    ]
 
-    except Exception as e:
-        error_msg = str(e).lower()
+    last_error = None
 
-        # Groq rate limit hit → switch to Gemini and retry once
-        if any(term in error_msg for term in ["429", "rate_limit", "quota", "exceeded"]):
-            print(f"[Model Router] Rate limit hit, switching models...", flush=True)
-            switch_to_gemini()
+    for model_name, switch_fn in fallback_chain:
+        if switch_fn:
+            switch_fn()
+        try:
+            print(f"[Model Router] Trying {model_name}...", flush=True)
+            result = await run_agent()
+            print(f"[Model Router] Success with {model_name}", flush=True)
+            return {"reply": result}
 
-            try:
-                full_response = ""
-                async for event in runner.run_async(
-                    session_id=session_id,
-                    user_id=user_id,
-                    new_message=content
-                ):
-                    if hasattr(event, 'content') and event.content and event.content.parts:
-                        for part in event.content.parts:
-                            if hasattr(part, 'text') and part.text:
-                                full_response += part.text
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
 
-                return {"reply": full_response}
+            if is_rate_limit_error(error_str):
+                print(f"[Model Router] {model_name} rate limited → trying next...", flush=True)
+                continue
 
-            except Exception as e2:
-                error_msg2 = str(e2).lower()
-                # Gemini also rate limited → tell user to wait
-                if any(term in error_msg2 for term in ["429", "rate_limit", "quota", "exceeded"]):
-                    raise HTTPException(
-                        status_code=429,
-                        detail="Both models are rate limited. Please wait a few minutes and try again."
-                    )
-                raise HTTPException(status_code=500, detail=f"Agent Execution Failure: {str(e2)}")
+            # Non-rate-limit error — log and raise immediately, don't try other models
+            print(f"RUNTIME AGENT ERROR: {error_str}", file=sys.stderr, flush=True)
+            raise HTTPException(status_code=500, detail=f"Agent Execution Failure: {error_str}")
 
-        print(f"RUNTIME AGENT ERROR EXCEPTION: {str(e)}", file=sys.stderr, flush=True)
-        raise HTTPException(status_code=500, detail=f"Agent Execution Failure: {str(e)}")
-
-# async def chat_with_agent(user_input: dict):
-#     assert runner is not None, "Runner has not been initialized"
-#     query = user_input.get("message")
-
-#     if not query:
-#         raise HTTPException(status_code=400, detail="Incoming request message payload cannot be empty.")
-
-#     if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
-#         print("CRITICAL CONFIG ERROR: Missing Google API Key.", file=sys.stderr, flush=True)
-#         raise HTTPException(status_code=500, detail="Backend configuration error: API key is missing.")
-
-#     user_id = "web_user"
-#     session_id = "web_session"
-
-#     # Ensure session exists (handles cases where runner restarted mid-flight)
-#     try:
-#         session = await runner.session_service.get_session(
-#             app_name="react_agent_app",
-#             user_id=user_id,
-#             session_id=session_id
-#         )
-#         if session is None:
-#             await runner.session_service.create_session(
-#                 app_name="react_agent_app",
-#                 user_id=user_id,
-#                 session_id=session_id
-#             )
-#     except Exception:
-#         await runner.session_service.create_session(
-#             app_name="react_agent_app",
-#             user_id=user_id,
-#             session_id=session_id
-#         )
-
-#     content = types.Content(
-#         role='user',
-#         parts=[types.Part(text=query)]
-#     )
-
-#     full_response = ""
-
-#     try:
-#         async for event in runner.run_async(
-#             session_id=session_id,
-#             user_id=user_id,
-#             new_message=content
-#         ):
-#             if hasattr(event, 'content') and event.content and event.content.parts:
-#                 for part in event.content.parts:
-#                     if hasattr(part, 'text') and part.text:
-#                         full_response += part.text
-
-#         return {"reply": full_response}
-
-#     except Exception as e:
-#         print(f"RUNTIME AGENT ERROR EXCEPTION: {str(e)}", file=sys.stderr, flush=True)
-#         raise HTTPException(status_code=500, detail=f"Agent Execution Failure: {str(e)}")
-
+    # All 4 models exhausted
+    print("[Model Router] All models rate limited.", file=sys.stderr, flush=True)
+    raise HTTPException(
+        status_code=429,
+        detail="All models are currently rate limited. Please wait a few minutes and try again."
+    )
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
