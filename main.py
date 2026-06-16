@@ -73,8 +73,13 @@ async def chat_with_agent(user_input: dict):
     assert runner is not None, "Runner has not been initialized"
 
     query = user_input.get("message")
+    timezone = user_input.get("timezone", "UTC")
+    local_time = user_input.get("local_time", "unknown")
+
     if not query:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
+    
+    enriched_query = f"""[User context: Current timezone is {timezone}, local time is {local_time}] User request: {query}"""
 
     if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GOOGLE_API_KEY"):
         if not os.environ.get("GROQ_API_KEY") and not os.environ.get("CEREBRAS_API_KEY"):
@@ -105,7 +110,7 @@ async def chat_with_agent(user_input: dict):
 
     content = types.Content(
         role='user',
-        parts=[types.Part(text=query)]
+        parts=[types.Part(text=enriched_query)]
     )
 
     async def run_agent() -> str:
@@ -113,7 +118,7 @@ async def chat_with_agent(user_input: dict):
 
         assert runner is not None, "Runner has not been initialized"
         full_response = ""
-        
+
         async for event in runner.run_async(
             session_id=session_id,
             user_id=user_id,

@@ -66,7 +66,7 @@ CURRENT_EVENT_KEYWORDS = [
     "this week", "this month", "this year", "2024", "2025", "2026",
     "news", "update", "happening", "live", "right now", "just",
     "yesterday", "tonight", "this morning", "new", "announced",
-    "released", "launched", "trending"
+    "released", "launched", "trending", "how old"
 ]
 
 def is_current_event_query(query: str) -> bool:
@@ -183,11 +183,25 @@ my_doc_tool = FunctionTool(save_to_word)
 
 # ── 4. Agents ─────────────────────────────────────────────────────────────────
 
+# research_agent = Agent(
+#     name="ResearchAgent",
+#     model=my_model,
+#     instruction="""You are a specialized research agent. Your only job is to use the
+#     web_search tool to find 2-3 pieces of relevant information on the given topic and present the findings with citations.""",
+#     tools=[my_search_tool],
+#     output_key="research_findings",
+# )
+
 research_agent = Agent(
     name="ResearchAgent",
     model=my_model,
-    instruction="""You are a specialized research agent. Your only job is to use the
-    web_search tool to find 2-3 pieces of relevant information on the given topic and present the findings with citations.""",
+    instruction="""You are a specialized research agent.
+
+The user's timezone and local time are included in the request context.
+When searching, use this to make queries time and location aware.
+For example instead of searching "latest news" search "latest news June 2026 East Africa"
+
+Use the web_search tool to find 2-3 relevant results and present findings with citations.""",
     tools=[my_search_tool],
     output_key="research_findings",
 )
@@ -230,6 +244,15 @@ root_agent = Agent(
     name="ResearchCoordinator",
     model=my_model,
     instruction="""You are a high-level routing orchestrator.
+
+
+IMPORTANT: Every user message includes a context block at the top with the user's
+timezone and local time. Always use this when:
+- Answering questions about current events, time, or dates
+- Passing search queries to ResearchAgent (include the date/timezone in the query
+  so results are geographically and temporally accurate)
+- Generating documents that include dates
+
 
 Analyze the user's request and follow the correct path:
 
