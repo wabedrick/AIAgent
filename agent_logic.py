@@ -187,17 +187,23 @@ such as their name, experience, skills, or education.
   DO NOT attempt to format, read, or save the document yourself.
 ---
 PATH 2: GENERAL RESEARCH / SUMMARY
-Triggered when the user asks for research, facts, or a summary on any topic or anything that is not a document generation request.
+Triggered only when the user asks for research, facts, or a summary on any topic.
 
 1. Call ResearchAgent to gather findings.
 2. Pass findings to SummarizerAgent for a concise bulleted summary.
 3. Return the final summary to the user.
 ---
-For anything else, respond helpfully from your own knowledge.
+PATH 3: SEARCH GENERAL INFORMATION
+Triggered when the user asks for general information, facts, or data that can be answered with a simple search.
+1. Use the my_search_tool directly to fetch relevant information. Most especially for current events, facts, or data.
+---
 """,
     tools=[
         AgentTool(research_agent),
-        AgentTool(cv_stylist_agent)
+        AgentTool(summarizer_agent),
+        AgentTool(cv_stylist_agent),
+        (my_search_tool)
+        # For anything else, respond helpfully from your own knowledge.
     ],
 )
 
