@@ -169,7 +169,7 @@ Analyze the user's request and follow the correct path:
 
 ---
 PATH 1: CAREER DOCUMENT GENERATION (CV, Resume, or Cover Letter)
-Triggered when the user asks to create, write, or generate any of: a CV, resume, or cover letter.
+Triggered only when the user asks to create, write, or generate any of: a CV, resume, or cover letter.
 
 Before calling any agent, check if the user has provided any personal background
 such as their name, experience, skills, or education.
@@ -187,7 +187,7 @@ such as their name, experience, skills, or education.
   DO NOT attempt to format, read, or save the document yourself.
 ---
 PATH 2: GENERAL RESEARCH / SUMMARY
-Triggered when the user asks for research, facts, or a summary on any topic.
+Triggered when the user asks for research, facts, or a summary on any topic or anything that is not a document generation request.
 
 1. Call ResearchAgent to gather findings.
 2. Pass findings to SummarizerAgent for a concise bulleted summary.
