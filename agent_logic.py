@@ -4,13 +4,15 @@ import platform
 from docx import Document
 from dotenv import load_dotenv
 from duckduckgo_search import DDGS
+from tavily import TavilyClient # type: ignore
+import re
 
 # Import native Google ADK requirements
 from google.adk.agents import Agent
-from google.adk.models.google_llm import Gemini
+# from google.adk.models.google_llm import Gemini
 from google.adk.runners import InMemoryRunner
-from google.adk.tools import FunctionTool, AgentTool, google_search
-from google.genai import types
+from google.adk.tools import FunctionTool, AgentTool
+# from google.genai import types
 from google.adk.models.lite_llm import LiteLlm
 import litellm
 
@@ -36,25 +38,97 @@ my_model = LiteLlm(
 # The underlying Google GenAI SDK automatically grabs your API key from the environment.
 # my_model = Gemini(model=my_model_name)
 
+# Keywords that signal the user wants current/recent information
+CURRENT_EVENT_KEYWORDS = [
+    "today", "latest", "current", "recent", "now", "breaking",
+    "this week", "this month", "this year", "2024", "2025",
+    "news", "update", "happening", "live", "right now", "just",
+    "yesterday", "tonight", "this morning", "new", "announced",
+    "released", "launched", "trending"
+]
+
+def is_current_event_query(query: str) -> bool:
+    """Detect if the query is about current or recent events."""
+    query_lower = query.lower()
+    return any(keyword in query_lower for keyword in CURRENT_EVENT_KEYWORDS)
+
+def search_with_duckduckgo(query: str) -> str:
+    """Fallback search using DuckDuckGo for general/non-current queries."""
+    try:
+        ddgs = DDGS()
+        results = ddgs.text(query, max_results=3)
+        if not results:
+            return "No results found."
+        return "\n\n".join([
+            f"Title: {res['title']}\nSnippet: {res['body']}"
+            for res in results
+        ])
+    except Exception as e:
+        return f"DuckDuckGo search failed: {str(e)}"
+
+def search_with_tavily(query: str) -> str:
+    """Search using Tavily for current events and real-time data."""
+    try:
+        client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
+        response = client.search(
+            query=query,
+            search_depth="advanced",
+            max_results=3,
+            include_answer=True,
+        )
+        output = ""
+        if response.get("answer"):
+            output += f"Direct Answer: {response['answer']}\n\n"
+        results = response.get("results", [])
+        if results:
+            output += "\n\n".join([
+                f"Title: {r['title']}\nURL: {r['url']}\nSnippet: {r['content']}"
+                for r in results
+            ])
+        return output if output else "No results found."
+    except Exception as e:
+        error_msg = str(e).lower()
+        # Tavily quota exceeded — fall back to DuckDuckGo
+        if any(term in error_msg for term in ["quota", "limit", "exceeded", "402", "429"]):
+            print("Tavily quota exceeded, falling back to DuckDuckGo.", flush=True)
+            return search_with_duckduckgo(query)
+        return f"Tavily search failed: {str(e)}"
 
 def web_search(query: str) -> str:
-    """Use this tool to search the internet for current events, facts, or data."""
-    try:
-        # Initialize DuckDuckGo search
-        ddgs = DDGS()
-        # Get the top 3 results
-        results = ddgs.text(query, max_results=3)
-        
-        # Format the results into a string for the LLM to read
-        formatted_results = "\n\n".join(
-            [f"Title: {res['title']}\nSnippet: {res['body']}" for res in results]
-        )
-        return formatted_results if formatted_results else "No results found."
-    except Exception as e:
-        return f"Search failed: {str(e)}"
+    """
+    Smart search router:
+    - Current/recent event queries → Tavily (real-time, accurate)
+    - General/historical queries → DuckDuckGo
+    - Tavily quota exceeded → automatically falls back to DuckDuckGo
+    """
+    if is_current_event_query(query):
+        print(f"[Router] Current event detected → using Tavily for: {query}", flush=True)
+        return search_with_tavily(query)
+    else:
+        print(f"[Router] General query detected → using DuckDuckGo for: {query}", flush=True)
+        return search_with_duckduckgo(query)
 
-# Wrap the standard function into an ADK-compatible tool
 my_search_tool = FunctionTool(web_search)
+
+
+# def web_search(query: str) -> str:
+#     """Use this tool to search the internet for current events, facts, or data."""
+#     try:
+#         # Initialize DuckDuckGo search
+#         ddgs = DDGS()
+#         # Get the top 3 results
+#         results = ddgs.text(query, max_results=3)
+        
+#         # Format the results into a string for the LLM to read
+#         formatted_results = "\n\n".join(
+#             [f"Title: {res['title']}\nSnippet: {res['body']}" for res in results]
+#         )
+#         return formatted_results if formatted_results else "No results found."
+#     except Exception as e:
+#         return f"Search failed: {str(e)}"
+
+# # Wrap the standard function into an ADK-compatible tool
+# my_search_tool = FunctionTool(web_search)
 
 # Research Agent: Its job is to use the custom web_search tool and present findings.
 research_agent = Agent(
