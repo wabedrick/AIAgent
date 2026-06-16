@@ -28,21 +28,31 @@ if not groq_keys:
 
 groq_key_cycle = itertools.cycle(groq_keys)
 
+retry_config = types.HttpRetryOptions(
+    attempts=5,  # Maximum retry attempts
+    exp_base=7,  # Delay multiplier
+    initial_delay=1,
+    http_status_codes=[429, 500, 503, 504],  # Retry on these HTTP errors
+)
+
 def make_groq_model() -> LiteLlm:
     """Creates a fresh Groq model instance using the next key in rotation."""
     return LiteLlm(
         model="groq/llama-3.3-70b-versatile",
         api_key=next(groq_key_cycle),
-        num_retries=2,
+        num_retries=5,
         timeout=120
     )
 
-gemini_model = Gemini(model="gemini-2.0-flash")
+gemini_model = Gemini(
+    model="gemini-2.0-flash",
+    retry_options=retry_config
+)
 
 cerebras_model = LiteLlm(
     model="cerebras/llama-3.3-70b",
     api_key=os.getenv("CEREBRAS_API_KEY"),
-    num_retries=2,
+    num_retries=5,
     timeout=120
 )
 
