@@ -9,7 +9,7 @@ import re
 
 # Import native Google ADK requirements
 from google.adk.agents import Agent
-# from google.adk.models.google_llm import Gemini
+from google.adk.models.google_llm import Gemini
 from google.adk.runners import InMemoryRunner
 from google.adk.tools import FunctionTool, AgentTool
 # from google.genai import types
@@ -21,18 +21,79 @@ litellm._turn_on_debug()  # type: ignore # shows full error details in Render lo
 
 load_dotenv()
 
-# 1. Retrieve the model identifier set in your Render environment variables panel.
-# We fall back to "gemini-2.5-flash" if running locally without an env file.
-# my_model_name = os.getenv("my_model_name", "gemini-2.0-flash")
+# ─── Model Configuration ─────────────────────────────────────────────────────
 
-# my_model = LiteLlm(model="groq/llama-3.1-8b-instant")
+GROQ_MODEL = "groq/llama-3.3-70b-versatile"
+GEMINI_MODEL = "gemini-2.0-flash"  # highest free tier: 1500 req/day
 
-my_model = LiteLlm(
-    model="groq/llama-3.3-70b-versatile",
-    api_key=os.getenv("GROQ_API_KEY"),
-    num_retries=5,
-    timeout=60
-)
+# Track which model is currently active
+current_model_index = 0
+
+models = [
+    {
+        "name": "Groq",
+        "model": LiteLlm(
+            model=GROQ_MODEL,
+            api_key=os.getenv("GROQ_API_KEY"),
+            num_retries=2,
+            timeout=120
+        )
+    },
+    {
+        "name": "Gemini",
+        "model": Gemini(model=GEMINI_MODEL)
+    }
+]
+
+# groq_model = LiteLlm(
+#     model="groq/llama-3.3-70b-versatile",
+#     api_key=os.getenv("GROQ_API_KEY"),
+#     num_retries=2,
+#     timeout=120
+# )
+
+# gemini_model = Gemini(model="gemini-2.0-flash")
+
+# # Start with Groq as primary
+# my_model = groq_model
+
+def get_active_model():
+    """Returns the currently active model."""
+    return models[current_model_index]["model"]
+
+def switch_model():
+    """Switch to the next available model."""
+    global current_model_index
+    previous = models[current_model_index]["name"]
+    current_model_index = (current_model_index + 1) % len(models)
+    active = models[current_model_index]["name"]
+    print(f"[Model Router] Switched from {previous} → {active}", flush=True)
+
+def get_model_with_fallback():
+    """
+    Returns a model-aware wrapper. If the active model hits a rate limit,
+    it automatically switches to the other one.
+    """
+    return SmartModel()
+
+# ─── Smart Model Wrapper ──────────────────────────────────────────────────────
+
+class SmartModel:
+    """
+    Wraps LiteLlm/Gemini and intercepts rate limit errors to switch models.
+    ADK agents accept this as a valid model since we implement __call__.
+    """
+    def __getattr__(self, name):
+        return getattr(get_active_model(), name)
+
+my_model = get_active_model()
+
+# my_model = LiteLlm(
+#     model="groq/llama-3.3-70b-versatile",
+#     api_key=os.getenv("GROQ_API_KEY"),
+#     num_retries=5,
+#     timeout=60
+# )
 
 # 2. Initialize the native Google Gemini model configuration.
 # The underlying Google GenAI SDK automatically grabs your API key from the environment.
@@ -288,3 +349,30 @@ if __name__ == "__main__":
     runner = InMemoryRunner(agent=root_agent)
     response = runner.run_debug(user_input)
     print(response)
+
+# agent_logic.py — add this function at the bottom
+
+def switch_to_gemini():
+    """Rebuild all agents using Gemini as the model."""
+    global my_model, research_agent, summarizer_agent, cv_stylist_agent, root_agent
+
+    # my_model = gemini_model
+    my_model = models[1]["model"]  # Gemini is the second in the list
+    print("[Model Router] Switching all agents to Gemini 2.0 Flash", flush=True)
+
+    research_agent.model = models[1]["model"]  # Gemini
+    summarizer_agent.model = models[1]["model"]  # Gemini
+    cv_stylist_agent.model = models[1]["model"]  # Gemini
+    root_agent.model = models[1]["model"]  # Gemini
+
+def switch_to_groq():
+    """Rebuild all agents using Groq as the model."""
+    global my_model, research_agent, summarizer_agent, cv_stylist_agent, root_agent
+
+    my_model = models[0]["model"]  # Groq is the first in the list
+    print("[Model Router] Switching all agents to Groq llama-3.3-70b", flush=True)
+
+    research_agent.model = models[0]["model"]  # Groq
+    summarizer_agent.model = models[0]["model"]  # Groq
+    cv_stylist_agent.model = models[0]["model"]  # Groq
+    root_agent.model = models[0]["model"]  # Groq
